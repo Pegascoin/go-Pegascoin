@@ -129,12 +129,12 @@ func AccumulateRewards(statedb *state.StateDB, header *types.Header, uncles []*t
 			a = big.NewInt(150000)
 			if a.Cmp(header.Number) != 1 {
 				// if block>=150000
-				a = big.NewInt(990000)
+				a = big.NewInt(555555)
 				if a.Cmp(header.Number) != 1 {
-					// if block>=990000
+					// if block>=555555
 					BlockReward = new(big.Int).Mul(big.NewInt(5), big.NewInt(1e+18))
 				} else {
-					// if block>=150000 and block<990000
+					// if block>=150000 and block<555555
 					BlockReward = new(big.Int).Mul(big.NewInt(25), big.NewInt(1e+18))
 				}
 			} else {
