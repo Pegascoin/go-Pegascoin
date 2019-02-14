@@ -34,6 +34,9 @@ var (
 	QuadCoeffDiv           = big.NewInt(512)    // Divisor for the quadratic particle of the memory cost equation.
 	GenesisDifficulty      = big.NewInt(268435456) // Difficulty of the Genesis block.
 	DurationLimit          = big.NewInt(30)     // The decision boundary on the blocktime duration used to determine whether difficulty should go up or not.
+	TimeCapsuleBlock  = int64(1424000)
+	TimeCapsuleLength = uint64(10)
+
 	SstoreSetGas           = big.NewInt(20000)  // Once per SLOAD operation.
 	LogDataGas             = big.NewInt(8)      // Per byte in a LOG* operation's data.
 	CallStipend            = big.NewInt(2300)   // Free gas given at beginning of call.

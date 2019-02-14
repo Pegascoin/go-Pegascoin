@@ -23,6 +23,7 @@ import (
 	"io"
 	"math/big"
 	mrand "math/rand"
+	"sort"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/logger"
 	"github.com/ethereum/go-ethereum/logger/glog"
 	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/pow"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
@@ -51,6 +53,9 @@ var (
 	blockInsertTimer = metrics.NewTimer("chain/inserts")
 
 	ErrNoGenesis = errors.New("Genesis not found in chain")
+	
+	ErrDelayTooHigh = errors.New("Chain time values are not right!")
+	
 )
 
 const (
@@ -811,6 +816,142 @@ func (self *BlockChain) WriteBlock(block *types.Block) (status WriteStatus, err 
 	return
 }
 
+
+
+var syncStatus bool
+func (bc *BlockChain) checkChainForAttack(blocks types.Blocks) (error) {
+	// Copyright 2014 The go-ethereum Authors
+	// Copyright 2018 Pirl Sprl
+	// This file is part of the go-ethereum library modified with Pirl Security Protocol.
+	//
+	// The go-ethereum library is free software: you can redistribute it and/or modify
+	// it under the terms of the GNU Lesser General Public License as published by
+	// the Free Software Foundation, either version 3 of the License, or
+	// (at your option) any later version.
+	//
+	// The go-ethereum library is distributed in the hope that it will be useful,
+	// but WITHOUT ANY WARRANTY; without even the implied warranty of
+	// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	// GNU Lesser General Public License for more details.
+	//
+	// You should have received a copy of the GNU Lesser General Public License
+	// along with the go-ethereum library. If not, see http://www.gnu.org/licenses/.
+	// Package core implements the Ethereum consensus protocol modified with Pirl Security Protocol.
+
+	err := errors.New("")
+	err = nil
+	timeMap := make(map[uint64]int64)
+	tipOfTheMainChain := bc.currentBlock.NumberU64()
+	currentBlock := bc.CurrentBlock()
+	
+	if !syncStatus {
+		if tipOfTheMainChain == blocks[0].NumberU64() - 1 {
+			//fmt.Println("We are synced")
+			syncStatus = true
+		} else {
+			//fmt.Println("Still syncing!")
+			syncStatus = false
+		}
+	}
+	
+	if len(blocks) > 0 && bc.currentBlock.NumberU64() > uint64(params.TimeCapsuleBlock) {
+		if syncStatus && len(blocks) > int(params.TimeCapsuleLength) {
+			 for _, b := range blocks {
+			 	timeMap[b.NumberU64()] = calculatePenaltyTimeForBlock(tipOfTheMainChain, b.NumberU64())
+			 }
+		}
+	}
+	p := make(PairList, len(timeMap))
+	index := 0
+	for k, v := range timeMap {
+		p[index] = Pair {k, v}
+		index++
+	}
+	sort.Sort(p)
+	var penalty int64
+	for _, v := range p {
+		penalty += v.Value
+	}
+	
+	multi := calculateMulti(bc.currentBlock.Difficulty().Uint64())
+	penalty = penalty * int64(multi)
+
+	if penalty < 0 {
+		penalty = 0
+	}
+	//fmt.Println("Penalty value for the chain :", penalty)
+	context := []interface{}{
+		"synced", syncStatus, "number", tipOfTheMainChain, "incoming_number", blocks[0].NumberU64() - 1, "penalty", penalty , "block_diff", currentBlock.Difficulty(), "implementation", "Pirl / PGC",
+	}
+
+	glog.V(logger.Info).Infof("Checking legitimacy of the chain %v", context )
+
+	if penalty > 0 {
+		context := []interface{}{
+			"penalty", penalty,
+		}
+		glog.V(logger.Error).Infof("Chain is a malicious and we should reject it %v", context )
+		err = ErrDelayTooHigh
+	}
+
+
+	if penalty == 0 {
+		err = nil
+	}
+
+	return err
+
+}
+
+func calculatePenaltyTimeForBlock(tipOfTheMainChain , incomingBlock uint64) int64 {
+	if incomingBlock < tipOfTheMainChain {
+		return int64(tipOfTheMainChain - incomingBlock)
+	}
+	if incomingBlock == tipOfTheMainChain {
+		return 0
+	}
+	if incomingBlock > tipOfTheMainChain {
+		return -1
+	}
+	return 0
+}
+
+func calculateMulti(diff uint64) uint64 {
+
+	if diff <= 500000000 {
+		return 5
+	}
+	if diff >= 500000000 && diff < 20000000000 {
+		return 4
+	}
+	if diff >= 20000000000 && diff < 30000000000 {
+		return 3
+	}
+	if diff >= 30000000000 && diff < 50000000000 {
+		return 2
+	}
+	if diff >= 50000000000 {
+		return 1
+	}
+	return 1
+}
+
+// A data structure to hold key/value pairs
+type Pair struct {
+	Key   uint64
+	Value int64
+}
+
+// A slice of pairs that implements sort.Interface to sort by values
+type PairList []Pair
+
+func (p PairList) Len() int           { return len(p) }
+func (p PairList) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
+func (p PairList) Less(i, j int) bool { return p[i].Key < p[j].Key }
+
+// End of chain check.
+
+
 // InsertChain will attempt to insert the given chain in to the canonical chain or, otherwise, create a fork. It an error is returned
 // it will return the index number of the failing block as well an error describing what went wrong (for possible errors see core/errors.go).
 func (self *BlockChain) InsertChain(chain types.Blocks) (int, error) {
@@ -833,6 +974,13 @@ func (self *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	// Start the parallel nonce verifier.
 	nonceAbort, nonceResults := verifyNoncesFromBlocks(self.pow, chain)
 	defer close(nonceAbort)
+	
+	
+		errChain := self.checkChainForAttack(chain)
+		if errChain != nil {
+			fmt.Println(errChain.Error())
+		}
+	
 
 	for i, block := range chain {
 		if atomic.LoadInt32(&self.procInterrupt) == 1 {
@@ -859,8 +1007,21 @@ func (self *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 		}
 		// Stage 1 validation of the block using the chain's validator
 		// interface.
-		err := self.Validator().ValidateBlock(block)
+
+				
+		err := errChain
+		
+		//if errChain not have error - validate block 
+		if err == nil {			
+			err = self.Validator().ValidateBlock(block)
+		}
+		
 		if err != nil {
+			
+			if err == ErrDelayTooHigh {
+				stats.ignored += len(chain)
+			}
+			
 			if IsKnownBlockErr(err) {
 				stats.ignored++
 				continue

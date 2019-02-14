@@ -49,7 +49,7 @@ import (
 const (
 	clientIdentifier = "GPG"   // Client identifier to advertise over the network
 	versionMajor     = 1        // Major version component of the current release
-	versionMinor     = 2        // Minor version component of the current release
+	versionMinor     = 3        // Minor version component of the current release
 	versionPatch     = 0       // Patch version component of the current release
 	versionMeta      = "stable" // Version metadata to append to the version string
 
